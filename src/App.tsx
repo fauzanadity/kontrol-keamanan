@@ -244,7 +244,7 @@ const LandingPage: React.FC<{ onSelectRole: (role: 'member' | 'admin') => void }
           <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <User className="w-10 h-10 text-blue-600" />
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">Sistem Absensi Online</h1>
+          <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">Kontrol Pengamanan</h1>
           <p className="text-gray-500">Silakan pilih akses masuk Anda</p>
         </div>
         <div className="grid md:grid-cols-2 gap-6">
@@ -298,9 +298,6 @@ const LoginPage: React.FC<{ role: 'member' | 'admin'; users: UserT[]; onLogin: (
           {error && <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg">{error}</div>}
           <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold">Masuk</button>
         </form>
-        <div className="mt-6 text-xs text-center text-gray-400 bg-gray-50 p-3 rounded">
-           *Pastikan Database Supabase sudah disetup*
-        </div>
       </div>
     </div>
   );
