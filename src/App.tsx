@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Camera, LogOut, MessageSquare, Edit2, MapPin, User,
   Calendar, Home, History, UserPlus, ShieldPlus, Upload,
-  FileSpreadsheet, Printer, Trash2, Eye, EyeOff, Key, Lock, CheckCircle
+  FileSpreadsheet, Printer, Trash2, Eye, EyeOff, Key, Lock, CheckCircle, KeyRound
 } from 'lucide-react';
 import { supabase } from './supabaseClient'; 
 
@@ -43,9 +43,8 @@ interface UserT {
 
 // -------------------- Helpers --------------------
 
-// FUNGSI INI DITAMBAHKAN KEMBALI UNTUK MEMPERBAIKI ERROR TS2304
 const generatePassword = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let password = '';
   for (let i = 0; i < 6; i++) password += chars.charAt(Math.floor(Math.random() * chars.length));
   return password;
@@ -66,6 +65,15 @@ const DatabaseHelper = {
 
   deleteUser: async (nip: string) => {
     const { error } = await supabase.from('users').delete().eq('nip', nip);
+    if (error) throw new Error(error.message);
+  },
+
+  // Update Password
+  updateUserPassword: async (nip: string, newPass: string) => {
+    const { error } = await supabase
+      .from('users')
+      .update({ password: newPass })
+      .eq('nip', nip);
     if (error) throw new Error(error.message);
   },
 
@@ -198,6 +206,7 @@ const AttendanceSystem: React.FC = () => {
           attendances={attendances}
           onLogout={handleLogout}
           onRefresh={fetchData}
+          onUpdateCurrentUser={(updatedUser) => setCurrentUser(updatedUser)}
         />
       )}
 
@@ -210,7 +219,6 @@ const AttendanceSystem: React.FC = () => {
         />
       )}
 
-      {/* ERROR TS2739 FIXED: Props onUpdate... dihapus karena sudah tidak dipakai */}
       {currentPage === 'admin' && currentUser && (
         <AdminDashboard
           user={currentUser}
@@ -218,6 +226,8 @@ const AttendanceSystem: React.FC = () => {
           users={users}
           onLogout={handleLogout}
           onRefresh={fetchData}
+          // FITUR BARU: Pass fungsi update user ke admin dashboard juga
+          onUpdateCurrentUser={(updatedUser) => setCurrentUser(updatedUser)}
         />
       )}
     </div>
@@ -301,8 +311,9 @@ const MemberDashboard: React.FC<{
   attendances: AttendanceRecord[];
   onLogout: () => void;
   onRefresh: () => void;
-}> = ({ user, attendances, onLogout, onRefresh }) => {
-  const [view, setView] = useState<'menu' | 'input_token' | 'attend' | 'history'>('menu');
+  onUpdateCurrentUser: (user: UserT) => void;
+}> = ({ user, attendances, onLogout, onRefresh, onUpdateCurrentUser }) => {
+  const [view, setView] = useState<'menu' | 'input_token' | 'attend' | 'history' | 'change_password'>('menu');
 
   const handleTokenSuccess = () => {
     sessionStorage.setItem('token_ok', '1');
@@ -311,9 +322,17 @@ const MemberDashboard: React.FC<{
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-white shadow-2xl overflow-hidden sm:rounded-xl sm:my-8 sm:min-h-[80vh]">
-      <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
-        <div><h2 className="text-xl font-bold">Halo, {user.name}</h2><p className="text-blue-100 text-sm">NIP: {user.nip}</p></div>
-        <button onClick={onLogout} className="bg-white/20 p-2 rounded-lg hover:bg-white/30"><LogOut size={20}/></button>
+      <div className="bg-blue-600 p-6 text-white flex flex-col gap-4">
+        <div className="flex justify-between items-start">
+            <div><h2 className="text-xl font-bold">Halo, {user.name}</h2><p className="text-blue-100 text-sm">NIP: {user.nip}</p></div>
+            <button onClick={onLogout} className="bg-white/20 p-2 rounded-lg hover:bg-white/30"><LogOut size={20}/></button>
+        </div>
+        <button 
+            onClick={() => setView('change_password')} 
+            className="flex items-center gap-2 text-xs bg-blue-700/50 hover:bg-blue-700 px-3 py-2 rounded-lg w-fit transition-colors"
+        >
+            <KeyRound size={14} /> Ganti Password
+        </button>
       </div>
 
       <div className="p-6">
@@ -345,9 +364,133 @@ const MemberDashboard: React.FC<{
         )}
 
         {view === 'history' && <AttendanceHistory userId={user.nip} attendances={attendances} onBack={() => setView('menu')} />}
+
+        {view === 'change_password' && (
+            <ChangePasswordPage 
+                user={user} 
+                onBack={() => setView('menu')} 
+                onSuccess={(newPass) => {
+                    onUpdateCurrentUser({ ...user, password: newPass });
+                    onRefresh();
+                    setView('menu');
+                }} 
+            />
+        )}
       </div>
     </div>
   );
+};
+
+// -------------------- Change Password Page (Generic for Member & Admin) --------------------
+const ChangePasswordPage: React.FC<{ 
+    user: UserT; 
+    onBack: () => void; 
+    onSuccess: (newPass: string) => void; 
+}> = ({ user, onBack, onSuccess }) => {
+    const [oldPass, setOldPass] = useState('');
+    const [newPass, setNewPass] = useState('');
+    const [confirmPass, setConfirmPass] = useState('');
+    
+    // State untuk toggle mata masing-masing input
+    const [showOld, setShowOld] = useState(false);
+    const [showNew, setShowNew] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
+
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+
+        if (!oldPass || !newPass || !confirmPass) {
+            return setError('Semua field harus diisi.');
+        }
+        if (oldPass !== user.password) {
+            return setError('Password lama salah.');
+        }
+        if (newPass !== confirmPass) {
+            return setError('Konfirmasi password baru tidak cocok.');
+        }
+        if (newPass.length < 4) {
+            return setError('Password minimal 4 karakter.');
+        }
+
+        setLoading(true);
+        try {
+            await DatabaseHelper.updateUserPassword(user.nip, newPass);
+            alert('Password berhasil diubah!');
+            onSuccess(newPass);
+        } catch (err: any) {
+            setError('Gagal mengubah password: ' + err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="animate-fade-in">
+            <button onClick={onBack} className="flex items-center text-gray-600 mb-6 font-semibold"><Home size={18} className="mr-2"/> Kembali</button>
+            
+            <h3 className="text-xl font-bold mb-6 text-gray-800 border-b pb-2">Ganti Password</h3>
+            
+            <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Input Password Lama */}
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Password Lama</label>
+                    <div className="relative">
+                        <input 
+                            type={showOld ? 'text' : 'password'} 
+                            value={oldPass} 
+                            onChange={e=>setOldPass(e.target.value)} 
+                            className="w-full px-4 py-3 rounded-lg border focus:ring-2 focus:ring-blue-500 outline-none pr-12" 
+                        />
+                        <button type="button" onClick={()=>setShowOld(!showOld)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                            {showOld ? <EyeOff size={20}/> : <Eye size={20}/>}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Input Password Baru */}
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Password Baru</label>
+                    <div className="relative">
+                        <input 
+                            type={showNew ? 'text' : 'password'} 
+                            value={newPass} 
+                            onChange={e=>setNewPass(e.target.value)} 
+                            className="w-full px-4 py-3 rounded-lg border focus:ring-2 focus:ring-blue-500 outline-none pr-12" 
+                        />
+                        <button type="button" onClick={()=>setShowNew(!showNew)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                            {showNew ? <EyeOff size={20}/> : <Eye size={20}/>}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Input Konfirmasi Password */}
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Konfirmasi Password Baru</label>
+                    <div className="relative">
+                        <input 
+                            type={showConfirm ? 'text' : 'password'} 
+                            value={confirmPass} 
+                            onChange={e=>setConfirmPass(e.target.value)} 
+                            className="w-full px-4 py-3 rounded-lg border focus:ring-2 focus:ring-blue-500 outline-none pr-12" 
+                        />
+                        <button type="button" onClick={()=>setShowConfirm(!showConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                            {showConfirm ? <EyeOff size={20}/> : <Eye size={20}/>}
+                        </button>
+                    </div>
+                </div>
+
+                {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">{error}</div>}
+
+                <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 disabled:bg-gray-400">
+                    {loading ? 'Menyimpan...' : 'Simpan Password Baru'}
+                </button>
+            </form>
+        </div>
+    );
 };
 
 const TokenEntryPage: React.FC<{ onBack: () => void; onSuccess: () => void; }> = ({ onBack, onSuccess }) => {
@@ -425,8 +568,14 @@ const AttendanceForm: React.FC<{ user: UserT; onBack: () => void; onSuccess: () 
     const cvs = document.createElement('canvas');
     cvs.width = vidRef.current.videoWidth;
     cvs.height = vidRef.current.videoHeight;
-    cvs.getContext('2d')?.drawImage(vidRef.current, 0, 0);
-    setPhoto(cvs.toDataURL('image/jpeg')); 
+    const ctx = cvs.getContext('2d');
+    
+    if(ctx) {
+        ctx.drawImage(vidRef.current, 0, 0);
+        // KOMPRESI 50%
+        setPhoto(cvs.toDataURL('image/jpeg', 0.5)); 
+    }
+
     const stream = vidRef.current.srcObject as MediaStream;
     stream?.getTracks().forEach(t=>t.stop());
     setShowCam(false);
@@ -543,14 +692,15 @@ const AttendanceHistory: React.FC<{ userId: string; attendances: AttendanceRecor
   );
 };
 
-// ERROR TS6133 & TS2739 FIXED: Removed unused props onUpdateAttendances, onUpdateUsers
 const AdminDashboard: React.FC<{
   user: UserT;
   attendances: AttendanceRecord[];
   users: UserT[];
   onLogout: () => void;
   onRefresh: () => void;
-}> = ({ user, attendances, users, onLogout, onRefresh }) => {
+  onUpdateCurrentUser: (user: UserT) => void;
+}> = ({ user, attendances, users, onLogout, onRefresh, onUpdateCurrentUser }) => {
+  const [view, setView] = useState<'dashboard' | 'change_password'>('dashboard');
   const [tab, setTab] = useState<'daily' | 'users'>('daily');
   const [dailyToken, setDailyToken] = useState('...');
 
@@ -562,32 +712,66 @@ const AdminDashboard: React.FC<{
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
       <div className="max-w-6xl mx-auto">
         <div className="bg-white rounded-xl p-4 shadow-sm mb-6 flex justify-between items-center">
-           <div><h1 className="text-2xl font-bold text-gray-800">Admin Panel</h1><p className="text-gray-500 text-sm">Welcome, {user.name}</p></div>
+           <div className="flex items-center gap-4">
+             <div><h1 className="text-2xl font-bold text-gray-800">Admin Panel</h1><p className="text-gray-500 text-sm">Welcome, {user.name}</p></div>
+             {/* Tombol Ganti Password Admin */}
+             {view === 'dashboard' && (
+               <button 
+                  onClick={() => setView('change_password')} 
+                  className="hidden md:flex items-center gap-2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-2 rounded-lg transition-colors border border-gray-200"
+               >
+                  <KeyRound size={14} /> Ganti Password
+               </button>
+             )}
+           </div>
+           
            <div className="flex gap-2">
-              <button onClick={onRefresh} className="text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-semibold border border-blue-200">Refresh Data</button>
+              <button onClick={onRefresh} className="text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-semibold border border-blue-200">Refresh</button>
               <button onClick={onLogout} className="text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">Logout</button>
            </div>
         </div>
 
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 mb-8 text-white flex flex-col md:flex-row items-center justify-between shadow-lg">
-           <div>
-              <h2 className="text-xl font-bold opacity-90 flex items-center gap-2"><Key className="w-5 h-5"/> Token Absensi Hari Ini</h2>
-              <p className="text-blue-100 text-sm mt-1">Berikan kode ini kepada anggota untuk absensi.</p>
+        {/* View Ganti Password */}
+        {view === 'change_password' && (
+           <div className="max-w-lg mx-auto bg-white p-6 rounded-xl shadow-lg mt-10">
+              <ChangePasswordPage 
+                  user={user} 
+                  onBack={() => setView('dashboard')} 
+                  onSuccess={(newPass) => {
+                      onUpdateCurrentUser({ ...user, password: newPass });
+                      onRefresh();
+                      setView('dashboard');
+                  }} 
+              />
            </div>
-           <div className="mt-4 md:mt-0 bg-white/20 backdrop-blur-md px-8 py-4 rounded-xl border border-white/30">
-              <span className="text-5xl font-mono font-bold tracking-[0.5rem]">{dailyToken}</span>
-           </div>
-        </div>
+        )}
 
-        <div className="flex gap-2 mb-6">
-          <button onClick={() => setTab('daily')} className={`px-6 py-2 rounded-lg font-bold transition-all ${tab === 'daily' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>Laporan Harian</button>
-          <button onClick={() => setTab('users')} className={`px-6 py-2 rounded-lg font-bold transition-all ${tab === 'users' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>Manajemen User</button>
-        </div>
+        {/* View Dashboard Utama */}
+        {view === 'dashboard' && (
+          <div className="animate-fade-in">
+             <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 mb-8 text-white flex flex-col md:flex-row items-center justify-between shadow-lg">
+                <div>
+                   <h2 className="text-xl font-bold opacity-90 flex items-center gap-2"><Key className="w-5 h-5"/> Token Absensi Hari Ini</h2>
+                   <p className="text-blue-100 text-sm mt-1">Berikan kode ini kepada anggota untuk absensi.</p>
+                   {/* Mobile Change Pass Button */}
+                   <button onClick={() => setView('change_password')} className="md:hidden mt-4 text-xs bg-white/20 hover:bg-white/30 px-3 py-1 rounded flex items-center gap-1"><KeyRound size={12}/> Ganti Password Admin</button>
+                </div>
+                <div className="mt-4 md:mt-0 bg-white/20 backdrop-blur-md px-8 py-4 rounded-xl border border-white/30">
+                   <span className="text-5xl font-mono font-bold tracking-[0.5rem]">{dailyToken}</span>
+                </div>
+             </div>
 
-        {tab === 'daily' ? (
-          <DailyReportView attendances={attendances} onRefresh={onRefresh} adminUser={user} />
-        ) : (
-          <UserManagementView users={users} onRefresh={onRefresh} />
+             <div className="flex gap-2 mb-6">
+               <button onClick={() => setTab('daily')} className={`px-6 py-2 rounded-lg font-bold transition-all ${tab === 'daily' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>Laporan Harian</button>
+               <button onClick={() => setTab('users')} className={`px-6 py-2 rounded-lg font-bold transition-all ${tab === 'users' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>Manajemen User</button>
+             </div>
+
+             {tab === 'daily' ? (
+               <DailyReportView attendances={attendances} onRefresh={onRefresh} adminUser={user} />
+             ) : (
+               <UserManagementView users={users} onRefresh={onRefresh} />
+             )}
+          </div>
         )}
       </div>
     </div>
@@ -723,7 +907,6 @@ const DailyReportView: React.FC<{
   );
 };
 
-// ERROR TS2304 FIXED: Fungsi generatePassword sudah didefinisikan di atas dan bisa diakses
 const UserManagementView: React.FC<{
   users: UserT[];
   onRefresh: () => void;
