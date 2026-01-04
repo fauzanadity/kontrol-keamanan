@@ -161,6 +161,19 @@ const AttendanceSystem: React.FC = () => {
   };
 
   useEffect(() => {
+    // --- TAMBAHAN UNTUK TEST KONEKSI ---
+    console.log("Mencoba koneksi ke Supabase...");
+    supabase.from('users').select('*').then(({ data, error }) => {
+        if (error) {
+            console.error("❌ GAGAL KONEK:", error.message);
+            alert("Koneksi Gagal: " + error.message);
+        } else {
+            console.log("✅ BERHASIL KONEK! Data User:", data);
+            // alert("Koneksi Berhasil! Cek Console"); // Aktifkan jika ingin popup
+        }
+    });
+    // ------------------------------------
+
     fetchData();
   }, []);
 
